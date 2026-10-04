@@ -48,19 +48,34 @@ app.post('/api/youtube', async (req: Request, res: Response) => {
     return;
   }
 
-  // Regex for extracting video ID
-  const ytRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/;
-  const match = url.match(ytRegex);
+  // Robust URL extraction supporting watch?v=, youtu.be, shorts, live, embed, and query params
+  let videoId: string | null = null;
+  try {
+    const raw = url.trim();
+    const urlObj = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+    if (urlObj.hostname.includes('youtu.be')) {
+      videoId = urlObj.pathname.slice(1).split(/[?#&]/)[0] || null;
+    } else if (urlObj.pathname.includes('/shorts/')) {
+      videoId = urlObj.pathname.split('/shorts/')[1]?.split(/[?#&]/)[0] || null;
+    } else if (urlObj.pathname.includes('/live/')) {
+      videoId = urlObj.pathname.split('/live/')[1]?.split(/[?#&]/)[0] || null;
+    } else if (urlObj.pathname.includes('/embed/')) {
+      videoId = urlObj.pathname.split('/embed/')[1]?.split(/[?#&]/)[0] || null;
+    } else {
+      videoId = urlObj.searchParams.get('v');
+    }
+  } catch {
+    const match = url.match(/(?:v=|\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/);
+    videoId = match ? match[1] : null;
+  }
 
-  if (!match || !match[1]) {
+  if (!videoId || videoId.length !== 11) {
     res.status(400).json({ error: "That doesn't look like a valid YouTube link." });
     return;
   }
 
-  const videoId = match[1];
-
   try {
-    // Fetch video metadata via YouTube oEmbed
+    // 1. Fetch metadata via oEmbed
     let videoTitle = 'Educational Lecture';
     let authorName = 'Educational Channel';
 
@@ -75,47 +90,82 @@ app.post('/api/youtube', async (req: Request, res: Response) => {
       // Continue even if oembed fails
     }
 
-    // Attempt to retrieve public captions if possible
+    // 2. Retrieve public captions/timedtext
     let transcriptText = '';
     let hasTranscript = false;
 
-    // Check if captions can be scraped from timedtext if video page contains caption tracks
     try {
       const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
           'Accept-Language': 'en-US,en;q=0.9',
         },
       });
+
       if (pageRes.ok) {
         const html = await pageRes.text();
         const captionMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
         if (captionMatch && captionMatch[1]) {
-          const captionTracks = JSON.parse(captionMatch[1]) as { baseUrl: string; languageCode: string }[];
-          const englishTrack = captionTracks.find(t => t.languageCode?.startsWith('en')) || captionTracks[0];
-          if (englishTrack && englishTrack.baseUrl) {
-            const trackRes = await fetch(englishTrack.baseUrl);
+          const captionTracks = JSON.parse(captionMatch[1]) as { baseUrl: string; languageCode?: string; vssId?: string }[];
+          // Prioritize English or manual tracks over automated
+          const targetTrack = captionTracks.find(t => t.languageCode === 'en' || t.languageCode?.startsWith('en'))
+            || captionTracks.find(t => t.vssId?.includes('en'))
+            || captionTracks[0];
+
+          if (targetTrack && targetTrack.baseUrl) {
+            const trackRes = await fetch(targetTrack.baseUrl);
             if (trackRes.ok) {
-              const xmlText = await trackRes.text();
-              // Parse <text start="..." dur="...">content</text>
-              const matches = xmlText.matchAll(/<text start="([\d.]+)" dur="([\d.]+)"[^>]*>(.*?)<\/text>/g);
-              const lines: string[] = [];
-              for (const m of matches) {
-                const startSec = Math.floor(parseFloat(m[1]));
-                const min = Math.floor(startSec / 60);
-                const sec = startSec % 60;
-                const timeStr = `[${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}]`;
-                const textContent = m[3]
-                  .replace(/&amp;/g, '&')
-                  .replace(/&lt;/g, '<')
-                  .replace(/&gt;/g, '>')
-                  .replace(/&#39;/g, "'")
-                  .replace(/&quot;/g, '"');
-                lines.push(`${timeStr} ${textContent}`);
-              }
-              if (lines.length > 0) {
-                transcriptText = lines.join('\n');
-                hasTranscript = true;
+              const bodyText = await trackRes.text();
+
+              // Handle XML timedtext format: <text start="X" dur="Y">Content</text>
+              if (bodyText.includes('<text')) {
+                const matches = bodyText.matchAll(/<text start="([\d.]+)" dur="([\d.]+)"[^>]*>(.*?)<\/text>/g);
+                const lines: string[] = [];
+                for (const m of matches) {
+                  const startSec = Math.floor(parseFloat(m[1]));
+                  const min = Math.floor(startSec / 60);
+                  const sec = startSec % 60;
+                  const timeStr = `[${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}]`;
+                  const textContent = m[3]
+                    .replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&#39;/g, "'")
+                    .replace(/&quot;/g, '"')
+                    .replace(/<[^>]+>/g, '')
+                    .trim();
+                  if (textContent) {
+                    lines.push(`${timeStr} ${textContent}`);
+                  }
+                }
+                if (lines.length > 0) {
+                  transcriptText = lines.join('\n');
+                  hasTranscript = true;
+                }
+              } else if (bodyText.startsWith('{') && bodyText.includes('events')) {
+                // Handle JSON format
+                try {
+                  const jsonTrack = JSON.parse(bodyText);
+                  const lines: string[] = [];
+                  for (const ev of jsonTrack.events || []) {
+                    if (ev.segs && Array.isArray(ev.segs)) {
+                      const text = ev.segs.map((s: any) => s.utf8 || '').join('').trim();
+                      if (text) {
+                        const startSec = Math.floor((ev.tStartMs || 0) / 1000);
+                        const min = Math.floor(startSec / 60);
+                        const sec = startSec % 60;
+                        const timeStr = `[${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}]`;
+                        lines.push(`${timeStr} ${text}`);
+                      }
+                    }
+                  }
+                  if (lines.length > 0) {
+                    transcriptText = lines.join('\n');
+                    hasTranscript = true;
+                  }
+                } catch {
+                  // Fallback
+                }
               }
             }
           }
@@ -139,20 +189,164 @@ app.post('/api/youtube', async (req: Request, res: Response) => {
       return;
     }
 
-    // If transcript is not directly available, follow the product specification:
-    // "If transcript is unavailable: Show a friendly error: DASTANAY couldn't access a transcript for this lecture. Then provide: Upload Transcript and Paste Transcript."
+    // Honest failure as required: Never fake the transcript
     res.json({
       success: false,
       reason: 'no_transcript',
       videoId,
       title: videoTitle,
       author: authorName,
-      friendlyMessage: "DASTANAY couldn't access a public transcript for this lecture.",
+      friendlyMessage: "Transcript isn't available for this video.",
       allowManualTranscript: true,
     });
   } catch (err) {
     res.status(500).json({
-      error: 'Something went wrong while retrieving the YouTube lecture.',
+      error: 'Could not retrieve the transcript right now.',
+      details: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+// Context-Aware Gemini Chat with Google Search Grounding ("Study Chat" / "Ask DASTANAY")
+app.post('/api/chat', async (req: Request, res: Response) => {
+  const {
+    messages = [],
+    context = null,
+    forceSearch = false,
+  } = req.body;
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    res.status(400).json({ error: 'Please provide at least one message.' });
+    return;
+  }
+
+  const latestMsg = messages[messages.length - 1];
+  const userQuery = latestMsg?.content || '';
+
+  // Determine if Google Search Grounding should be enabled:
+  // 1. Explicitly requested by user toggle
+  // 2. Query asks for current events/news/latest statistics/budget/who is currently
+  const currentIndicators = /\b(latest|current|recent|news|today|budget|2025|2026|who is the current|prime minister|president|who won|world record|search the web|search web)\b/i;
+  const isCurrentInfoQuery = currentIndicators.test(userQuery);
+  const shouldGroundSearch = forceSearch || (isCurrentInfoQuery && !userQuery.toLowerCase().includes('in my notes'));
+
+  // Build structured contextual prompt
+  let contextSection = '';
+  if (context) {
+    contextSection = `
+=== CURRENT STUDY CONTEXT ===
+Study Pack Title: ${context.studyPackTitle || 'Active Material'}
+Subject: ${context.subject || 'General'}
+Difficulty: ${context.difficulty || 'Exam Focused'}
+Current Section: ${context.currentSection || 'Overview'}
+Summary: ${context.summary || 'N/A'}
+Key Formulas: ${context.formulas?.map((f: any) => `${f.name}: ${f.formula} (${f.explanation})`).join(' | ') || 'None'}
+Definitions: ${context.definitions?.map((d: any) => `${d.term}: ${d.definition}`).join(' | ') || 'None'}
+Chapter Highlights: ${context.chapters?.map((c: any) => `${c.title || c.chapterTitle}: ${c.mainConcept || ''} (Key Idea: ${c.keyIdea || ''})`).join(' | ') || 'None'}
+Source Attribution: ${context.sourceAttribution || 'User upload'}
+=== END STUDY CONTEXT ===
+`;
+  }
+
+  const systemInstruction = `
+You are DASTANAY's official Study Companion ("Ask DASTANAY").
+Your purpose is to help students learn, understand, and master their educational material.
+You are academic, encouraging, intelligent, clear, and direct.
+
+CONTEXT PRIORITY:
+1. Current section and active study pack provided in context.
+2. Relevant user-uploaded notes and material.
+3. General scientific, mathematical, and academic knowledge.
+4. Google Search Grounding when real-time, current, or external factual verification is required.
+
+CORE CAPABILITIES:
+- Explain complex concepts simply with intuitive analogies.
+- Break down mathematical and physics formulas step-by-step with units and variable meanings.
+- Provide concrete illustrative examples.
+- Compare and contrast confusing terms (e.g. Speed vs Velocity, Mitosis vs Meiosis).
+- Create short practice check questions to test the student.
+- Offer memory mnemonics and active recall revision tips.
+
+ANTI-HALLUCINATION RULES:
+- If the student asks specifically about information in their notes or uploaded document (e.g. "What did the teacher say about..."), and it is NOT present in the provided context, DO NOT fabricate it.
+- State honestly: "I couldn't find that in your study material."
+- Then offer: "Would you like me to explain this concept using general academic principles, or search the web for external information?"
+- Maintain clean formatting with Markdown (bold terms, bullet points, formula code blocks). Do not use decorative emojis.
+`;
+
+  try {
+    if (ai) {
+      const contentsPayload: any[] = [];
+
+      // Format conversation history
+      messages.forEach((msg: { role: string; content: string }) => {
+        contentsPayload.push({
+          role: msg.role === 'model' ? 'model' : 'user',
+          parts: [{ text: msg.content }],
+        });
+      });
+
+      // Inject system instruction and context into the prompt
+      const generationConfig: any = {
+        systemInstruction,
+      };
+
+      if (shouldGroundSearch) {
+        generationConfig.tools = [{ googleSearch: {} }];
+      }
+
+      // Prepend context to the latest message part
+      if (contextSection) {
+        const lastIndex = contentsPayload.length - 1;
+        if (lastIndex >= 0 && contentsPayload[lastIndex].role === 'user') {
+          contentsPayload[lastIndex].parts = [
+            { text: `${contextSection}\n\nUser Question: ${userQuery}` }
+          ];
+        }
+      }
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: contentsPayload,
+        config: generationConfig,
+      });
+
+      const replyText = response.text || "I'm here to help with your study material. What would you like to review?";
+
+      // Extract Google Search Grounding sources if present
+      const candidate = response.candidates?.[0];
+      const groundingMetadata = candidate?.groundingMetadata;
+      const sources: { title: string; url: string }[] = [];
+
+      if (groundingMetadata && Array.isArray(groundingMetadata.groundingChunks)) {
+        groundingMetadata.groundingChunks.forEach((chunk: any) => {
+          if (chunk.web && chunk.web.uri) {
+            sources.push({
+              title: chunk.web.title || 'Web Source',
+              url: chunk.web.uri,
+            });
+          }
+        });
+      }
+
+      res.json({
+        reply: replyText,
+        isGrounded: sources.length > 0 || !!groundingMetadata?.webSearchQueries?.length,
+        sources,
+      });
+      return;
+    }
+
+    // Fallback if no API key is configured
+    res.json({
+      reply: `In DASTANAY study mode, concepts are structured for fast revision. ${context ? `Currently reviewing "${context.studyPackTitle}".` : 'Upload notes to begin targeted learning.'}`,
+      isGrounded: false,
+      sources: [],
+    });
+  } catch (err: any) {
+    console.error('Chat API error:', err);
+    res.status(500).json({
+      error: 'The study assistant encountered an error. Please try again.',
       details: err instanceof Error ? err.message : String(err),
     });
   }
@@ -437,6 +631,166 @@ ${context.slice(0, 4000)}
   // Fallback questions to guarantee user requested count
   const fallbackQuestions = generateFallbackMCQs(title, count);
   res.json({ success: true, questions: fallbackQuestions, isFallback: true });
+});
+
+// Context-Aware Gemini Study Chat & Google Search Grounding Endpoint
+app.post('/api/chat', async (req: Request, res: Response) => {
+  const { messages = [], context = null, forceSearch = false } = req.body;
+
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    res.status(400).json({ error: 'Please provide valid messages array.' });
+    return;
+  }
+
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  const userQuery = lastUserMsg ? lastUserMsg.content : '';
+
+  // Detect whether Google Search Grounding is required or recommended
+  const queryLower = userQuery.toLowerCase();
+  const searchKeywords = [
+    'latest', 'current', 'news', 'recent', 'today', '2024', '2025', '2026',
+    'budget', 'who is', 'price', 'gdp', 'inflation', 'election', 'minister',
+    'pakistan', 'event', 'weather', 'stock', 'policy', 'statistic'
+  ];
+  const wantsSearch = forceSearch || searchKeywords.some(kw => queryLower.includes(kw));
+
+  // Build pedagogical system instruction
+  let systemInstruction = `You are "Ask DASTANAY" (also known as Study Chat), the intelligent educational companion for DASTANAY — "Turn Learning Into a Story".
+Your mission is to help students truly master their study materials, understand complex concepts, solve numerical formulas, and prepare for exams.
+
+Core Pedagogical Directives:
+1. Context Priority & Anti-Hallucination:
+- If active study material context is provided below, treat it as the primary source of truth.
+- If the student asks a question about their study material/notes and that concept is NOT found in their notes, NEVER fabricate or pretend that it is in their notes. Explicitly state: "I couldn't find that in your study material." Then, proceed to explain it using general academic knowledge or web search if appropriate.
+- When answering questions about uploaded materials, synthesize directly from their chapters, definitions, and formulas.
+2. Tone & Structure:
+- Editorial, authoritative, and encouraging.
+- Never use AI clichés like "Certainly!", "As an AI model...", "Here is what you asked for:". Speak directly as an experienced teacher/tutor.
+- Use clean formatting: bold key terms, concise bullet points, and step-by-step numbered derivations.
+- Keep explanations clear and proportional to what the student asked (simplify when asked to simplify, go deep when asked for details).
+3. Student Mastery Capabilities:
+- Explain and simplify challenging topics with intuitive everyday analogies.
+- Break down mathematical and scientific formulas with clear variable definitions and SI units.
+- Compare and contrast confusing concepts (e.g. speed vs. velocity, mitosis vs. meiosis).
+- Generate practice examination questions and provide step-by-step model answers.
+- Diagnose why a student's answer was incorrect without discouragement.
+- Provide memorable mnemonic memory hooks.
+`;
+
+  if (context) {
+    systemInstruction += `\n--- ACTIVE STUDENT STUDY MATERIAL CONTEXT ---\n`;
+    if (context.studyPackTitle) systemInstruction += `Title: ${context.studyPackTitle}\n`;
+    if (context.subject) systemInstruction += `Subject: ${context.subject}\n`;
+    if (context.difficulty) systemInstruction += `Difficulty Level: ${context.difficulty}\n`;
+    if (context.summary) systemInstruction += `Executive Summary:\n${context.summary}\n`;
+
+    if (context.chapters && Array.isArray(context.chapters) && context.chapters.length > 0) {
+      systemInstruction += `\nKey Chapters & Concepts:\n`;
+      context.chapters.forEach((c: any, idx: number) => {
+        systemInstruction += `Chapter ${c.chapterNumber || idx + 1}: ${c.chapterTitle || 'Section'}\n`;
+        if (c.mainConcept) systemInstruction += `  • Main Concept: ${c.mainConcept}\n`;
+        if (c.keyIdea) systemInstruction += `  • Key Idea: ${c.keyIdea}\n`;
+        if (c.remember) systemInstruction += `  • Essential Note: ${c.remember}\n`;
+        if (c.example) systemInstruction += `  • Example: ${c.example}\n`;
+      });
+    }
+
+    if (context.formulas && Array.isArray(context.formulas) && context.formulas.length > 0) {
+      systemInstruction += `\nFormulas & Mathematical Models:\n`;
+      context.formulas.forEach((f: any) => {
+        systemInstruction += `  • ${f.name}: ${f.formula} — ${f.explanation || ''}\n`;
+      });
+    }
+
+    if (context.definitions && Array.isArray(context.definitions) && context.definitions.length > 0) {
+      systemInstruction += `\nCore Definitions:\n`;
+      context.definitions.forEach((d: any) => {
+        systemInstruction += `  • ${d.term}: ${d.definition}\n`;
+      });
+    }
+    systemInstruction += `--- END STUDY MATERIAL CONTEXT ---\n`;
+  }
+
+  // Format messages into contents array
+  const formattedContents = messages.map((m: { role: 'user' | 'model'; content: string }) => ({
+    role: m.role === 'model' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }));
+
+  try {
+    if (ai) {
+      const config: any = {
+        systemInstruction,
+      };
+
+      // Enable Google Search Grounding when requested or when current web info is needed
+      if (wantsSearch) {
+        config.tools = [{ googleSearch: {} }];
+      }
+
+      let response;
+      const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+      for (const m of modelsToTry) {
+        try {
+          response = await ai.models.generateContent({
+            model: m,
+            contents: formattedContents,
+            config,
+          });
+          if (response && response.text) break;
+        } catch (mErr) {
+          console.warn(`Model ${m} in /api/chat error, trying next:`, mErr instanceof Error ? mErr.message : String(mErr));
+        }
+      }
+
+      if (response && response.text) {
+        let isGrounded = false;
+        const sources: { title: string; url: string }[] = [];
+
+        // Extract grounding chunks if search was used
+        const grounding = response.candidates?.[0]?.groundingMetadata;
+        if (grounding?.groundingChunks && Array.isArray(grounding.groundingChunks)) {
+          for (const chunk of grounding.groundingChunks) {
+            if (chunk.web?.uri) {
+              isGrounded = true;
+              sources.push({
+                title: chunk.web.title || chunk.web.uri,
+                url: chunk.web.uri,
+              });
+            }
+          }
+        }
+
+        res.json({
+          reply: response.text.trim(),
+          isGrounded,
+          sources,
+        });
+        return;
+      }
+    }
+  } catch (err) {
+    console.error('Chat endpoint error:', err);
+  }
+
+  // Graceful rule-based educational response when offline or before API key setup
+  let fallbackReply = '';
+  if (context && context.studyPackTitle) {
+    fallbackReply = `Based on your study pack **"${context.studyPackTitle}"**:\n\n${
+      context.summary
+        ? `${context.summary.slice(0, 300)}...\n\n`
+        : ''
+    }To study this effectively: focus on the core governing relationships, test yourself on the definitions, and review the formula cheat-sheet. Let me know which specific formula or chapter concept you'd like me to explain step-by-step!`;
+  } else {
+    fallbackReply = `I am your **DASTANAY Study Companion**. You can upload lecture notes, slides, or textbook excerpts to generate a tailored Study Pack, or ask me directly to explain any academic concept, formula, or exam strategy.`;
+  }
+
+  res.json({
+    reply: fallbackReply,
+    isGrounded: false,
+    sources: [],
+    isFallback: true,
+  });
 });
 
 // Intelligent fallback generator to ensure DASTANAY works reliably even offline or during API limits

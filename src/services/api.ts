@@ -83,6 +83,27 @@ export async function fetchYoutubeLecture(url: string): Promise<YoutubeResponse>
   return response.json();
 }
 
+export async function sendStudyChat(payload: {
+  messages: { role: 'user' | 'model'; content: string }[];
+  context?: any;
+  forceSearch?: boolean;
+}): Promise<{ reply: string; isGrounded: boolean; sources: { title: string; url: string }[] }> {
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Failed to communicate with Study Chat');
+  }
+
+  return response.json();
+}
+
 export async function checkServerHealth(): Promise<{ status: string; hasApiKey: boolean }> {
   try {
     const res = await fetch('/api/health');

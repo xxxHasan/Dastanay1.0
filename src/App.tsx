@@ -14,6 +14,7 @@ import { FlashcardEngineView } from './components/FlashcardEngineView';
 import { LibraryView } from './components/LibraryView';
 import { ProfileSettingsView } from './components/ProfileSettingsView';
 import { AuthModal } from './components/AuthModal';
+import { StudyChatDrawer } from './components/StudyChatDrawer';
 import { 
   StudyPack, 
   MaterialType, 
@@ -39,8 +40,19 @@ import {
   getStoredTheme,
   applyTheme
 } from './services/storage';
+import { 
+  subscribeToAuthChanges, 
+  signOutUser,
+  saveFirestoreStudyPack, 
+  getFirestoreStudyPacks, 
+  deleteFirestoreStudyPack,
+  saveFirestoreQuizAttempt,
+  getFirestoreQuizAttempts,
+  saveFirestoreSettings,
+  getFirestoreSettings
+} from './services/firebase';
 import { analyzeMaterial } from './services/api';
-import { BookOpen, Sparkles, PlusCircle } from 'lucide-react';
+import { BookOpen, Sparkles, PlusCircle, MessageSquare } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
@@ -56,6 +68,9 @@ export default function App() {
   // Authentication state
   const [user, setUser] = useState<User>(getAuthUser());
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+
+  // Study Chat Drawer state
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
 
   // Theme state
   const [theme, setTheme] = useState<ThemeMode>(getStoredTheme());
@@ -77,7 +92,7 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3200);
   };
 
-  // Initialize storage & theme
+  // Initialize storage, theme & Firebase Auth Sync
   useEffect(() => {
     const loadedPacks = getStoredStudyPacks();
     setPacks(loadedPacks);
@@ -94,6 +109,32 @@ export default function App() {
     const savedTheme = getStoredTheme();
     setTheme(savedTheme);
     applyTheme(savedTheme);
+
+    // Subscribe to Firebase Auth and sync cloud data
+    const unsubscribe = subscribeToAuthChanges(async (fbUser) => {
+      if (fbUser) {
+        setUser(fbUser);
+        try {
+          const remotePacks = await getFirestoreStudyPacks(fbUser.id);
+          if (remotePacks.length > 0) {
+            setPacks(remotePacks);
+            setActivePack(remotePacks[0]);
+          }
+          const remoteAttempts = await getFirestoreQuizAttempts(fbUser.id);
+          if (remoteAttempts.length > 0) {
+            setAttempts(remoteAttempts);
+          }
+          const remoteSettings = await getFirestoreSettings(fbUser.id);
+          if (remoteSettings) {
+            setPreferences(remoteSettings);
+          }
+        } catch (syncErr) {
+          console.warn('Firebase cloud sync notice:', syncErr);
+        }
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   // Demo Action Trigger - NEVER writes to user library!
@@ -161,6 +202,10 @@ export default function App() {
         };
 
         saveStudyPack(newPack);
+        if (user && !user.isGuest) {
+          await saveFirestoreStudyPack(user.id, newPack);
+        }
+
         const refreshedPacks = getStoredStudyPacks();
         setPacks(refreshedPacks);
         setActivePack(newPack);
@@ -182,8 +227,11 @@ export default function App() {
     setActiveTab('pack_detail');
   };
 
-  const handleDeletePack = (packId: string) => {
+  const handleDeletePack = async (packId: string) => {
     deleteStudyPack(packId);
+    if (user && !user.isGuest) {
+      await deleteFirestoreStudyPack(user.id, packId);
+    }
     const refreshed = getStoredStudyPacks();
     setPacks(refreshed);
     if (activePack?.id === packId) {
@@ -202,17 +250,23 @@ export default function App() {
     showToast('Renamed study pack');
   };
 
-  const handleSaveAttempt = (attempt: QuizAttempt) => {
+  const handleSaveAttempt = async (attempt: QuizAttempt) => {
     if (!isDemoMode) {
       saveQuizAttempt(attempt);
+      if (user && !user.isGuest) {
+        await saveFirestoreQuizAttempt(user.id, attempt);
+      }
       setAttempts(getStoredQuizAttempts());
     }
     showToast('Quiz results saved');
   };
 
-  const handleSavePreferences = (prefs: UserPreferences) => {
+  const handleSavePreferences = async (prefs: UserPreferences) => {
     savePreferences(prefs);
     setPreferences(prefs);
+    if (user && !user.isGuest) {
+      await saveFirestoreSettings(user.id, prefs);
+    }
     showToast('Preferences updated');
   };
 
@@ -225,16 +279,35 @@ export default function App() {
     showToast('Local study library cleared');
   };
 
-  const handleAuthSuccess = (authenticatedUser: User) => {
+  const handleAuthSuccess = async (authenticatedUser: User) => {
     setUser(authenticatedUser);
     setPreferences(getStoredPreferences());
+    if (!authenticatedUser.isGuest) {
+      try {
+        const remote = await getFirestoreStudyPacks(authenticatedUser.id);
+        if (remote.length > 0) {
+          setPacks(remote);
+          setActivePack(remote[0]);
+        }
+      } catch (e) {
+        console.warn('Failed to load remote study packs on login:', e);
+      }
+    }
     showToast(authenticatedUser.isGuest ? 'Continued in Guest Mode' : `Welcome back, ${authenticatedUser.name}!`);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await signOutUser();
+    } catch (e) {
+      console.warn('Firebase signout note:', e);
+    }
     logoutUser();
     const guestUser = getAuthUser();
     setUser(guestUser);
+    const localPacks = getStoredStudyPacks();
+    setPacks(localPacks);
+    setActivePack(localPacks.length > 0 ? localPacks[0] : null);
     showToast('Logged out. Switched to Guest Mode.');
   };
 
@@ -313,6 +386,7 @@ export default function App() {
                   onRenamePack={handleRenamePack}
                   isDemoMode={isDemoMode}
                   onExitDemo={handleExitDemo}
+                  onOpenChat={() => setIsChatOpen(true)}
                 />
               ) : (
                 <div className="max-w-md mx-auto py-16 text-center space-y-4">
@@ -455,9 +529,30 @@ export default function App() {
         onSuccess={handleAuthSuccess}
       />
 
+      {/* Floating Study Chat / Ask DASTANAY Trigger */}
+      <button
+        onClick={() => setIsChatOpen(true)}
+        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500 text-white text-xs font-semibold rounded-full shadow-lg hover:shadow-xl transition-all cursor-pointer border border-slate-700 dark:border-indigo-400 group"
+        aria-label="Ask DASTANAY Study Chat"
+      >
+        <MessageSquare className="w-4 h-4 text-indigo-400 dark:text-indigo-200 group-hover:scale-110 transition-transform" />
+        <span>Ask DASTANAY</span>
+        {activePack && (
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Active Study Pack Context" />
+        )}
+      </button>
+
+      {/* Ask DASTANAY Study Chat Drawer */}
+      <StudyChatDrawer
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        activePack={activePack}
+        user={user}
+      />
+
       {/* Floating Scannable Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-16 md:bottom-6 right-6 z-50 bg-slate-900 dark:bg-slate-800 text-white text-xs font-medium py-2.5 px-4 rounded-xl shadow-lg flex items-center gap-2 border border-slate-700 animate-fade-in">
+        <div className="fixed bottom-20 right-6 z-50 bg-slate-900 dark:bg-slate-800 text-white text-xs font-medium py-2.5 px-4 rounded-xl shadow-lg flex items-center gap-2 border border-slate-700 animate-fade-in">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           <span>{toastMessage}</span>
         </div>

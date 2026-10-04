@@ -1,0 +1,97 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information and preferences",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "isGuest": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "createdAt"]
+    },
+    "StudyPack": {
+      "title": "StudyPack",
+      "description": "Educational study pack containing chapters, formulas, definitions, questions, and revision sheet",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "summary": { "type": "string" },
+        "sourceAttribution": { "type": "string" }
+      },
+      "required": ["id", "userId", "title", "subject", "difficulty", "createdAt", "summary"]
+    },
+    "QuizAttempt": {
+      "title": "QuizAttempt",
+      "description": "Diagnostic and practice quiz result record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "packId": { "type": "string" },
+        "userId": { "type": "string" },
+        "date": { "type": "string" },
+        "totalQuestions": { "type": "number" },
+        "score": { "type": "number" },
+        "percentage": { "type": "number" }
+      },
+      "required": ["id", "packId", "userId", "date", "totalQuestions", "score", "percentage"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "Study companion chat session with context and messages",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "studyPackId": { "type": "string" },
+        "studyPackTitle": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "title", "createdAt", "updatedAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "Per-user application preferences",
+      "type": "object",
+      "properties": {
+        "theme": { "type": "string", "enum": ["light", "dark", "system"] },
+        "defaultDifficulty": { "type": "string" },
+        "defaultPdfStyle": { "type": "string" },
+        "prefersReducedMotion": { "type": "boolean" }
+      },
+      "required": ["theme", "defaultDifficulty", "defaultPdfStyle"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Root document for each authenticated user"
+    },
+    "/users/{userId}/studyPacks/{studyPackId}": {
+      "schema": "StudyPack",
+      "description": "Study packs owned exclusively by the user"
+    },
+    "/users/{userId}/quizzes/{quizId}": {
+      "schema": "QuizAttempt",
+      "description": "Quiz attempts and revision diagnostics for the user"
+    },
+    "/users/{userId}/chatSessions/{chatSessionId}": {
+      "schema": "ChatSession",
+      "description": "Chat conversations with study companion"
+    },
+    "/users/{userId}/settings/{settingsId}": {
+      "schema": "UserSettings",
+      "description": "User preferences and configuration"
+    }
+  }
+}

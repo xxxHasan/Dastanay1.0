@@ -19,7 +19,7 @@ import { StudyPack, PDFExportSettings } from '../types';
 import { downloadStudyGuide } from '../services/pdfGenerator';
 import { PDFPreviewModal } from './PDFPreviewModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
-import { Trash2, Edit3, MoreHorizontal } from 'lucide-react';
+import { Trash2, Edit3, MoreHorizontal, MessageSquare } from 'lucide-react';
 
 interface StudyPackDetailViewProps {
   pack: StudyPack;
@@ -30,6 +30,7 @@ interface StudyPackDetailViewProps {
   onRenamePack?: (packId: string, newTitle: string) => void;
   isDemoMode?: boolean;
   onExitDemo?: () => void;
+  onOpenChat?: () => void;
 }
 
 export const StudyPackDetailView: React.FC<StudyPackDetailViewProps> = ({
@@ -41,6 +42,7 @@ export const StudyPackDetailView: React.FC<StudyPackDetailViewProps> = ({
   onRenamePack,
   isDemoMode = false,
   onExitDemo,
+  onOpenChat,
 }) => {
   type DetailTab = 'notes' | 'summary' | 'formulas' | 'questions' | 'revision';
   const [activeTab, setActiveTab] = useState<DetailTab>('notes');
@@ -176,6 +178,17 @@ export const StudyPackDetailView: React.FC<StudyPackDetailViewProps> = ({
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 shrink-0">
+          {onOpenChat && (
+            <button
+              onClick={onOpenChat}
+              className="px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5"
+              title="Open Study Chat for this pack"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Ask DASTANAY</span>
+            </button>
+          )}
+
           <button
             onClick={handleShare}
             className="px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5"

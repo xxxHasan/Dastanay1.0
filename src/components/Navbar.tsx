@@ -11,9 +11,11 @@ import {
   LogOut, 
   Sun, 
   Moon, 
-  ChevronDown 
+  ChevronDown,
+  MessageSquare
 } from 'lucide-react';
 import { User, ThemeMode } from '../types';
+import { DastanayLogo } from './DastanayLogo';
 
 export type ActiveTab = 'home' | 'create' | 'library' | 'pack_detail' | 'quiz' | 'flashcards' | 'settings';
 
@@ -29,6 +31,7 @@ interface NavbarProps {
   onExitDemo?: () => void;
   theme?: ThemeMode;
   onToggleTheme?: () => void;
+  onOpenChat?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -43,6 +46,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onExitDemo,
   theme = 'light',
   onToggleTheme,
+  onOpenChat,
 }) => {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -62,16 +66,14 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Top Bar - Strictly complies with Top Bar Contract */}
       <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-          {/* Zone 1: Single text element wordmark */}
+          {/* Zone 1: Official DASTANAY Wordmark Logo */}
           <div className="flex items-center gap-3">
             <button
               onClick={() => setActiveTab('home')}
-              className="text-left group cursor-pointer focus:outline-none"
+              className="text-left group cursor-pointer focus:outline-none flex items-center"
               aria-label="DASTANAY Home"
             >
-              <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-white group-hover:text-indigo-600 transition-colors">
-                DASTANAY
-              </span>
+              <DastanayLogo height={26} />
             </button>
 
             {isDemoMode && (
@@ -126,6 +128,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               Flashcards
             </button>
+
+            {onOpenChat && (
+              <button
+                onClick={onOpenChat}
+                className="hover:text-indigo-600 dark:hover:text-indigo-400 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer pb-0.5 border-b-2 border-transparent inline-flex items-center gap-1.5 font-medium"
+              >
+                <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>Study Chat</span>
+              </button>
+            )}
+
             <button
               onClick={() => setActiveTab('settings')}
               className={`hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer pb-0.5 border-b-2 ${
@@ -244,49 +257,59 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Mobile Sticky Bottom Navigation (Touch targets >= 44px) */}
       <nav
         aria-label="Mobile Navigation"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 px-2 py-1 flex items-center justify-around shadow-lg"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 px-2 py-1 flex items-center justify-around shadow-lg"
       >
         <button
           onClick={() => setActiveTab('home')}
-          className={`flex flex-col items-center justify-center min-h-[48px] min-w-[56px] text-xs font-medium cursor-pointer transition-colors ${
-            activeTab === 'home' ? 'text-indigo-600' : 'text-slate-500 hover:text-slate-900'
+          className={`flex flex-col items-center justify-center min-h-[48px] min-w-[48px] text-[11px] font-medium cursor-pointer transition-colors ${
+            activeTab === 'home' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
-          <BookOpen className="w-5 h-5 mb-0.5" />
+          <BookOpen className="w-4 h-4 mb-0.5" />
           <span>Home</span>
         </button>
         <button
           onClick={() => setActiveTab('library')}
-          className={`flex flex-col items-center justify-center min-h-[48px] min-w-[56px] text-xs font-medium cursor-pointer transition-colors ${
-            activeTab === 'library' ? 'text-indigo-600' : 'text-slate-500 hover:text-slate-900'
+          className={`flex flex-col items-center justify-center min-h-[48px] min-w-[48px] text-[11px] font-medium cursor-pointer transition-colors ${
+            activeTab === 'library' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
-          <Library className="w-5 h-5 mb-0.5" />
+          <Library className="w-4 h-4 mb-0.5" />
           <span>Library</span>
         </button>
         <button
           onClick={() => setActiveTab('create')}
-          className="flex flex-col items-center justify-center min-h-[48px] min-w-[64px] text-xs font-semibold text-white bg-slate-900 rounded-xl px-3 py-1 my-1 shadow-md cursor-pointer"
+          className="flex flex-col items-center justify-center min-h-[44px] min-w-[56px] text-xs font-semibold text-white bg-slate-900 dark:bg-indigo-600 rounded-lg px-2.5 py-1 shadow-sm cursor-pointer"
         >
-          <PlusCircle className="w-5 h-5 mb-0.5 text-indigo-300" />
+          <PlusCircle className="w-4 h-4 mb-0.5" />
           <span>Create</span>
         </button>
-        <button
-          onClick={() => setActiveTab('quiz')}
-          className={`flex flex-col items-center justify-center min-h-[48px] min-w-[56px] text-xs font-medium cursor-pointer transition-colors ${
-            activeTab === 'quiz' ? 'text-indigo-600' : 'text-slate-500 hover:text-slate-900'
-          }`}
-        >
-          <Award className="w-5 h-5 mb-0.5" />
-          <span>Quiz</span>
-        </button>
+        {onOpenChat ? (
+          <button
+            onClick={onOpenChat}
+            className="flex flex-col items-center justify-center min-h-[48px] min-w-[48px] text-[11px] font-medium text-slate-500 hover:text-slate-900 dark:hover:text-white cursor-pointer transition-colors"
+          >
+            <MessageSquare className="w-4 h-4 mb-0.5 text-indigo-600 dark:text-indigo-400" />
+            <span>Chat</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => setActiveTab('quiz')}
+            className={`flex flex-col items-center justify-center min-h-[48px] min-w-[48px] text-[11px] font-medium cursor-pointer transition-colors ${
+              activeTab === 'quiz' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Award className="w-4 h-4 mb-0.5" />
+            <span>Quiz</span>
+          </button>
+        )}
         <button
           onClick={() => setActiveTab('settings')}
-          className={`flex flex-col items-center justify-center min-h-[48px] min-w-[56px] text-xs font-medium cursor-pointer transition-colors ${
-            activeTab === 'settings' ? 'text-indigo-600' : 'text-slate-500 hover:text-slate-900'
+          className={`flex flex-col items-center justify-center min-h-[48px] min-w-[48px] text-[11px] font-medium cursor-pointer transition-colors ${
+            activeTab === 'settings' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
-          <Settings className="w-5 h-5 mb-0.5" />
+          <Settings className="w-4 h-4 mb-0.5" />
           <span>Profile</span>
         </button>
       </nav>
