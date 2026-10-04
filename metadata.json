@@ -1,0 +1,6 @@
+{
+  "name": "DASTANAY — AI Study Companion",
+  "description": "Transform lectures, notes, PDFs, and educational videos into structured notes, flashcards, quizzes, and downloadable study guides.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
