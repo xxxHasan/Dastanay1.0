@@ -529,18 +529,18 @@ export default function App() {
         onSuccess={handleAuthSuccess}
       />
 
-      {/* Floating Study Chat / Ask DASTANAY Trigger */}
-      <button
-        onClick={() => setIsChatOpen(true)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500 text-white text-xs font-semibold rounded-full shadow-lg hover:shadow-xl transition-all cursor-pointer border border-slate-700 dark:border-indigo-400 group"
-        aria-label="Ask DASTANAY Study Chat"
-      >
-        <MessageSquare className="w-4 h-4 text-indigo-400 dark:text-indigo-200 group-hover:scale-110 transition-transform" />
-        <span>Ask DASTANAY</span>
-        {activePack && (
+      {/* Floating Study Chat / Ask DASTANAY Trigger - exclusively inside Study Pack Detail View */}
+      {activeTab === 'pack_detail' && activePack && (
+        <button
+          onClick={() => setIsChatOpen(true)}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500 text-white text-xs font-semibold rounded-full shadow-lg hover:shadow-xl transition-all cursor-pointer border border-slate-700 dark:border-indigo-400 group"
+          aria-label="Ask DASTANAY Study Chat"
+        >
+          <MessageSquare className="w-4 h-4 text-indigo-400 dark:text-indigo-200 group-hover:scale-110 transition-transform" />
+          <span>Ask DASTANAY</span>
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Active Study Pack Context" />
-        )}
-      </button>
+        </button>
+      )}
 
       {/* Ask DASTANAY Study Chat Drawer */}
       <StudyChatDrawer

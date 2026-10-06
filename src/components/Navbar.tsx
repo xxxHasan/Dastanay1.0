@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { motion } from 'motion/react';
 import { 
   BookOpen, 
   PlusCircle, 
@@ -86,67 +87,34 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Zone 2: Clean text navigation links */}
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
-            <button
-              onClick={() => setActiveTab('home')}
-              className={`hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer pb-0.5 border-b-2 ${
-                activeTab === 'home' ? 'text-slate-900 dark:text-white border-indigo-600 font-semibold' : 'border-transparent'
-              }`}
-            >
-              Home
-            </button>
-            <button
-              onClick={() => setActiveTab('library')}
-              className={`hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer pb-0.5 border-b-2 ${
-                activeTab === 'library' ? 'text-slate-900 dark:text-white border-indigo-600 font-semibold' : 'border-transparent'
-              }`}
-            >
-              My Library
-            </button>
-            {hasActivePack && (
-              <button
-                onClick={() => setActiveTab('pack_detail')}
-                className={`hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer pb-0.5 border-b-2 ${
-                  activeTab === 'pack_detail' ? 'text-slate-900 dark:text-white border-indigo-600 font-semibold' : 'border-transparent'
-                }`}
-              >
-                Study Pack
-              </button>
-            )}
-            <button
-              onClick={() => setActiveTab('quiz')}
-              className={`hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer pb-0.5 border-b-2 ${
-                activeTab === 'quiz' ? 'text-slate-900 dark:text-white border-indigo-600 font-semibold' : 'border-transparent'
-              }`}
-            >
-              Practice Quiz
-            </button>
-            <button
-              onClick={() => setActiveTab('flashcards')}
-              className={`hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer pb-0.5 border-b-2 ${
-                activeTab === 'flashcards' ? 'text-slate-900 dark:text-white border-indigo-600 font-semibold' : 'border-transparent'
-              }`}
-            >
-              Flashcards
-            </button>
-
-            {onOpenChat && (
-              <button
-                onClick={onOpenChat}
-                className="hover:text-indigo-600 dark:hover:text-indigo-400 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer pb-0.5 border-b-2 border-transparent inline-flex items-center gap-1.5 font-medium"
-              >
-                <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                <span>Study Chat</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer pb-0.5 border-b-2 ${
-                activeTab === 'settings' ? 'text-slate-900 dark:text-white border-indigo-600 font-semibold' : 'border-transparent'
-              }`}
-            >
-              Settings
-            </button>
+            {[
+              { id: 'home', label: 'Home' },
+              { id: 'library', label: 'My Library' },
+              ...(hasActivePack ? [{ id: 'pack_detail', label: 'Study Pack' }] : []),
+              { id: 'quiz', label: 'Practice Quiz' },
+              { id: 'flashcards', label: 'Flashcards' },
+              { id: 'settings', label: 'Settings' },
+            ].map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as ActiveTab)}
+                  className={`relative py-1 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer ${
+                    isActive ? 'text-slate-900 dark:text-white font-semibold' : ''
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  {isActive && (
+                    <motion.div
+                      layoutId="active-desktop-nav-line"
+                      className="absolute -bottom-0.5 left-0 right-0 h-0.5 bg-indigo-600 dark:bg-indigo-400 rounded-full"
+                      transition={{ type: 'spring', stiffness: 480, damping: 35 }}
+                    />
+                  )}
+                </button>
+              );
+            })}
           </nav>
 
           {/* Zone 3: Primary actions & User Auth */}
@@ -254,64 +222,58 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
-      {/* Mobile Sticky Bottom Navigation (Touch targets >= 44px) */}
+      {/* Mobile Sticky Bottom Navigation (Touch targets >= 44px with sliding active indicator) */}
       <nav
         aria-label="Mobile Navigation"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 px-2 py-1 flex items-center justify-around shadow-lg"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 px-2 py-1.5 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] flex items-center justify-around shadow-lg"
       >
-        <button
-          onClick={() => setActiveTab('home')}
-          className={`flex flex-col items-center justify-center min-h-[48px] min-w-[48px] text-[11px] font-medium cursor-pointer transition-colors ${
-            activeTab === 'home' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <BookOpen className="w-4 h-4 mb-0.5" />
-          <span>Home</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('library')}
-          className={`flex flex-col items-center justify-center min-h-[48px] min-w-[48px] text-[11px] font-medium cursor-pointer transition-colors ${
-            activeTab === 'library' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Library className="w-4 h-4 mb-0.5" />
-          <span>Library</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('create')}
-          className="flex flex-col items-center justify-center min-h-[44px] min-w-[56px] text-xs font-semibold text-white bg-slate-900 dark:bg-indigo-600 rounded-lg px-2.5 py-1 shadow-sm cursor-pointer"
-        >
-          <PlusCircle className="w-4 h-4 mb-0.5" />
-          <span>Create</span>
-        </button>
-        {onOpenChat ? (
-          <button
-            onClick={onOpenChat}
-            className="flex flex-col items-center justify-center min-h-[48px] min-w-[48px] text-[11px] font-medium text-slate-500 hover:text-slate-900 dark:hover:text-white cursor-pointer transition-colors"
-          >
-            <MessageSquare className="w-4 h-4 mb-0.5 text-indigo-600 dark:text-indigo-400" />
-            <span>Chat</span>
-          </button>
-        ) : (
-          <button
-            onClick={() => setActiveTab('quiz')}
-            className={`flex flex-col items-center justify-center min-h-[48px] min-w-[48px] text-[11px] font-medium cursor-pointer transition-colors ${
-              activeTab === 'quiz' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Award className="w-4 h-4 mb-0.5" />
-            <span>Quiz</span>
-          </button>
-        )}
-        <button
-          onClick={() => setActiveTab('settings')}
-          className={`flex flex-col items-center justify-center min-h-[48px] min-w-[48px] text-[11px] font-medium cursor-pointer transition-colors ${
-            activeTab === 'settings' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Settings className="w-4 h-4 mb-0.5" />
-          <span>Profile</span>
-        </button>
+        {[
+          { id: 'home', label: 'Home', icon: BookOpen },
+          { id: 'library', label: 'Library', icon: Library },
+          { id: 'create', label: 'Create', icon: PlusCircle, isPrimary: true },
+          { id: 'quiz', label: 'Quiz', icon: Award },
+          { id: 'settings', label: 'Profile', icon: Settings },
+        ].map((tab) => {
+          const isActive = activeTab === tab.id;
+          const Icon = tab.icon;
+
+          if (tab.isPrimary) {
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab('create')}
+                className="relative flex flex-col items-center justify-center min-h-[46px] min-w-[56px] text-xs font-semibold text-white bg-slate-900 dark:bg-indigo-600 rounded-xl px-3 py-1 shadow-xs cursor-pointer active:scale-95 transition-transform"
+                aria-label="Create New Study Material"
+              >
+                <Icon className="w-4 h-4 mb-0.5" />
+                <span>Create</span>
+              </button>
+            );
+          }
+
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as ActiveTab)}
+              className={`relative flex flex-col items-center justify-center min-h-[48px] min-w-[52px] text-[11px] font-medium cursor-pointer transition-colors ${
+                isActive
+                  ? 'text-indigo-600 dark:text-indigo-400 font-semibold'
+                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Icon className="w-4 h-4 mb-0.5" />
+              <span>{tab.label}</span>
+
+              {isActive && (
+                <motion.div
+                  layoutId="active-mobile-nav-pill"
+                  className="absolute inset-0 bg-indigo-50/90 dark:bg-indigo-950/70 rounded-xl -z-10 border border-indigo-200/80 dark:border-indigo-800/80"
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                />
+              )}
+            </button>
+          );
+        })}
       </nav>
     </>
   );

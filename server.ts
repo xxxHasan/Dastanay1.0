@@ -16,7 +16,7 @@ app.use(express.json({ limit: '30mb' }));
 app.use(express.urlencoded({ extended: true, limit: '30mb' }));
 
 // Initialize GoogleGenAI client server-side
-const apiKey = process.env.GEMINI_API_KEY;
+const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 let ai: GoogleGenAI | null = null;
 
 if (apiKey && apiKey !== 'MY_GEMINI_API_KEY') {
@@ -207,151 +207,6 @@ app.post('/api/youtube', async (req: Request, res: Response) => {
   }
 });
 
-// Context-Aware Gemini Chat with Google Search Grounding ("Study Chat" / "Ask DASTANAY")
-app.post('/api/chat', async (req: Request, res: Response) => {
-  const {
-    messages = [],
-    context = null,
-    forceSearch = false,
-  } = req.body;
-
-  if (!Array.isArray(messages) || messages.length === 0) {
-    res.status(400).json({ error: 'Please provide at least one message.' });
-    return;
-  }
-
-  const latestMsg = messages[messages.length - 1];
-  const userQuery = latestMsg?.content || '';
-
-  // Determine if Google Search Grounding should be enabled:
-  // 1. Explicitly requested by user toggle
-  // 2. Query asks for current events/news/latest statistics/budget/who is currently
-  const currentIndicators = /\b(latest|current|recent|news|today|budget|2025|2026|who is the current|prime minister|president|who won|world record|search the web|search web)\b/i;
-  const isCurrentInfoQuery = currentIndicators.test(userQuery);
-  const shouldGroundSearch = forceSearch || (isCurrentInfoQuery && !userQuery.toLowerCase().includes('in my notes'));
-
-  // Build structured contextual prompt
-  let contextSection = '';
-  if (context) {
-    contextSection = `
-=== CURRENT STUDY CONTEXT ===
-Study Pack Title: ${context.studyPackTitle || 'Active Material'}
-Subject: ${context.subject || 'General'}
-Difficulty: ${context.difficulty || 'Exam Focused'}
-Current Section: ${context.currentSection || 'Overview'}
-Summary: ${context.summary || 'N/A'}
-Key Formulas: ${context.formulas?.map((f: any) => `${f.name}: ${f.formula} (${f.explanation})`).join(' | ') || 'None'}
-Definitions: ${context.definitions?.map((d: any) => `${d.term}: ${d.definition}`).join(' | ') || 'None'}
-Chapter Highlights: ${context.chapters?.map((c: any) => `${c.title || c.chapterTitle}: ${c.mainConcept || ''} (Key Idea: ${c.keyIdea || ''})`).join(' | ') || 'None'}
-Source Attribution: ${context.sourceAttribution || 'User upload'}
-=== END STUDY CONTEXT ===
-`;
-  }
-
-  const systemInstruction = `
-You are DASTANAY's official Study Companion ("Ask DASTANAY").
-Your purpose is to help students learn, understand, and master their educational material.
-You are academic, encouraging, intelligent, clear, and direct.
-
-CONTEXT PRIORITY:
-1. Current section and active study pack provided in context.
-2. Relevant user-uploaded notes and material.
-3. General scientific, mathematical, and academic knowledge.
-4. Google Search Grounding when real-time, current, or external factual verification is required.
-
-CORE CAPABILITIES:
-- Explain complex concepts simply with intuitive analogies.
-- Break down mathematical and physics formulas step-by-step with units and variable meanings.
-- Provide concrete illustrative examples.
-- Compare and contrast confusing terms (e.g. Speed vs Velocity, Mitosis vs Meiosis).
-- Create short practice check questions to test the student.
-- Offer memory mnemonics and active recall revision tips.
-
-ANTI-HALLUCINATION RULES:
-- If the student asks specifically about information in their notes or uploaded document (e.g. "What did the teacher say about..."), and it is NOT present in the provided context, DO NOT fabricate it.
-- State honestly: "I couldn't find that in your study material."
-- Then offer: "Would you like me to explain this concept using general academic principles, or search the web for external information?"
-- Maintain clean formatting with Markdown (bold terms, bullet points, formula code blocks). Do not use decorative emojis.
-`;
-
-  try {
-    if (ai) {
-      const contentsPayload: any[] = [];
-
-      // Format conversation history
-      messages.forEach((msg: { role: string; content: string }) => {
-        contentsPayload.push({
-          role: msg.role === 'model' ? 'model' : 'user',
-          parts: [{ text: msg.content }],
-        });
-      });
-
-      // Inject system instruction and context into the prompt
-      const generationConfig: any = {
-        systemInstruction,
-      };
-
-      if (shouldGroundSearch) {
-        generationConfig.tools = [{ googleSearch: {} }];
-      }
-
-      // Prepend context to the latest message part
-      if (contextSection) {
-        const lastIndex = contentsPayload.length - 1;
-        if (lastIndex >= 0 && contentsPayload[lastIndex].role === 'user') {
-          contentsPayload[lastIndex].parts = [
-            { text: `${contextSection}\n\nUser Question: ${userQuery}` }
-          ];
-        }
-      }
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: contentsPayload,
-        config: generationConfig,
-      });
-
-      const replyText = response.text || "I'm here to help with your study material. What would you like to review?";
-
-      // Extract Google Search Grounding sources if present
-      const candidate = response.candidates?.[0];
-      const groundingMetadata = candidate?.groundingMetadata;
-      const sources: { title: string; url: string }[] = [];
-
-      if (groundingMetadata && Array.isArray(groundingMetadata.groundingChunks)) {
-        groundingMetadata.groundingChunks.forEach((chunk: any) => {
-          if (chunk.web && chunk.web.uri) {
-            sources.push({
-              title: chunk.web.title || 'Web Source',
-              url: chunk.web.uri,
-            });
-          }
-        });
-      }
-
-      res.json({
-        reply: replyText,
-        isGrounded: sources.length > 0 || !!groundingMetadata?.webSearchQueries?.length,
-        sources,
-      });
-      return;
-    }
-
-    // Fallback if no API key is configured
-    res.json({
-      reply: `In DASTANAY study mode, concepts are structured for fast revision. ${context ? `Currently reviewing "${context.studyPackTitle}".` : 'Upload notes to begin targeted learning.'}`,
-      isGrounded: false,
-      sources: [],
-    });
-  } catch (err: any) {
-    console.error('Chat API error:', err);
-    res.status(500).json({
-      error: 'The study assistant encountered an error. Please try again.',
-      details: err instanceof Error ? err.message : String(err),
-    });
-  }
-});
-
 // AI Study Pack Analysis & Generation Route
 app.post('/api/analyze', async (req: Request, res: Response) => {
   const {
@@ -467,98 +322,121 @@ Return ONLY valid JSON matching this exact structure:
 }
 `;
 
-  try {
-    if (ai) {
-      let response;
-      const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
-      let lastModelError: any = null;
+  if (!ai) {
+    res.status(503).json({
+      error: 'AI service is not configured. Please ensure GEMINI_API_KEY is configured in your environment variables.',
+      code: 'API_KEY_MISSING',
+    });
+    return;
+  }
 
-      // Prepare image parts if provided
-      const allImageParts: any[] = [];
-      if (Array.isArray(imagesBase64) && imagesBase64.length > 0) {
-        imagesBase64.forEach((b64, idx) => {
-          allImageParts.push({
-            inlineData: {
-              mimeType: mimeType || 'image/jpeg',
-              data: b64,
-            },
-          });
-          allImageParts.push({
-            text: `[Page ${idx + 1} of uploaded learning notes/document]`,
-          });
-        });
-      } else if (imageBase64) {
+  try {
+    let response;
+    const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+    let lastModelError: any = null;
+
+    // Prepare image parts if provided
+    const allImageParts: any[] = [];
+    if (Array.isArray(imagesBase64) && imagesBase64.length > 0) {
+      imagesBase64.forEach((b64, idx) => {
         allImageParts.push({
           inlineData: {
             mimeType: mimeType || 'image/jpeg',
-            data: imageBase64,
+            data: b64,
           },
         });
-      }
-
-      for (const modelName of modelsToTry) {
-        try {
-          if (allImageParts.length > 0) {
-            response = await ai.models.generateContent({
-              model: modelName,
-              contents: [
-                ...allImageParts,
-                { text: `${promptText}\n\nCarefully read all uploaded pages/notes in sequence. Extract handwriting, printed text, diagrams, and formulas.` },
-              ],
-              config: {
-                responseMimeType: 'application/json',
-              },
-            });
-          } else {
-            response = await ai.models.generateContent({
-              model: modelName,
-              contents: `${promptText}\n\n--- SOURCE MATERIAL CONTENT ---\n${content}`,
-              config: {
-                responseMimeType: 'application/json',
-              },
-            });
-          }
-
-          if (response && response.text) {
-            break; // Success!
-          }
-        } catch (mErr) {
-          lastModelError = mErr;
-          console.warn(`Model ${modelName} encountered issue, trying next:`, mErr instanceof Error ? mErr.message : String(mErr));
-        }
-      }
-
-      if (!response || !response.text) {
-        throw lastModelError || new Error('No response from AI models');
-      }
-
-      const responseText = response.text.trim();
-      let parsed;
-      try {
-        parsed = JSON.parse(responseText);
-      } catch {
-        const cleaned = responseText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-        parsed = JSON.parse(cleaned);
-      }
-
-      const studyPack = {
-        ...parsed,
-        id: `pack-${Date.now()}`,
-        createdAt: new Date().toISOString(),
-        title: parsed.title || title || 'Study Pack',
-        subject: parsed.subject || subject || 'General',
-        difficulty: parsed.difficulty || difficulty || 'Exam Focused',
-      };
-
-      res.json({ success: true, studyPack });
-      return;
+        allImageParts.push({
+          text: `[Page ${idx + 1} of uploaded learning notes/document]`,
+        });
+      });
+    } else if (imageBase64) {
+      allImageParts.push({
+        inlineData: {
+          mimeType: mimeType || 'image/jpeg',
+          data: imageBase64,
+        },
+      });
     }
+
+    for (const modelName of modelsToTry) {
+      try {
+        if (allImageParts.length > 0) {
+          response = await ai.models.generateContent({
+            model: modelName,
+            contents: [
+              ...allImageParts,
+              { text: `${promptText}\n\nCarefully read all uploaded pages/notes in sequence. Extract handwriting, printed text, diagrams, and formulas.` },
+            ],
+            config: {
+              responseMimeType: 'application/json',
+            },
+          });
+        } else {
+          response = await ai.models.generateContent({
+            model: modelName,
+            contents: `${promptText}\n\n--- SOURCE MATERIAL CONTENT ---\n${content}`,
+            config: {
+              responseMimeType: 'application/json',
+            },
+          });
+        }
+
+        if (response && response.text) {
+          break; // Success!
+        }
+      } catch (mErr) {
+        lastModelError = mErr;
+        console.warn(`Model ${modelName} encountered issue, trying next:`, mErr instanceof Error ? mErr.message : String(mErr));
+      }
+    }
+
+    if (!response || !response.text) {
+      throw lastModelError || new Error('No response from AI models');
+    }
+
+    const responseText = response.text.trim();
+    let parsed;
+    try {
+      parsed = JSON.parse(responseText);
+    } catch {
+      const cleaned = responseText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      parsed = JSON.parse(cleaned);
+    }
+
+    const studyPack = {
+      ...parsed,
+      id: `pack-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      title: parsed.title || title || 'Study Pack',
+      subject: parsed.subject || subject || 'General',
+      difficulty: parsed.difficulty || difficulty || 'Exam Focused',
+    };
+
+    res.json({ success: true, studyPack });
+    return;
   } catch (aiError) {
     const errorMsg = aiError instanceof Error ? aiError.message : String(aiError);
     console.error('Gemini API call error details:', errorMsg);
-    // Graceful rule-based educational generator fallback if API key is not configured or rate-limited
-    const fallbackPack = generateFallbackStudyPack(title || 'Study Material', subject, difficulty, content || '', targetQuestionCount);
-    res.json({ success: true, studyPack: fallbackPack, isFallback: true });
+
+    let status = 500;
+    let message = 'DASTANAY AI is temporarily unavailable. Please try again.';
+    let code = 'AI_ERROR';
+
+    if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('quota') || errorMsg.toLowerCase().includes('rate limit')) {
+      status = 429;
+      message = 'AI usage limit reached. Please try again shortly.';
+      code = 'RATE_LIMIT';
+    } else if (errorMsg.includes('401') || errorMsg.toLowerCase().includes('unauthorized') || errorMsg.toLowerCase().includes('api key')) {
+      status = 401;
+      message = 'AI API key is invalid or unauthorized. Please verify GEMINI_API_KEY.';
+      code = 'AUTH_ERROR';
+    }
+
+    res.status(status).json({
+      error: message,
+      details: errorMsg,
+      code,
+    });
     return;
   }
 });
@@ -598,47 +476,66 @@ Contextual material:
 ${context.slice(0, 4000)}
 `;
 
-  try {
-    if (ai) {
-      let response;
-      const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
-      for (const m of modelsToTry) {
-        try {
-          response = await ai.models.generateContent({
-            model: m,
-            contents: quizPrompt,
-            config: { responseMimeType: 'application/json' },
-          });
-          if (response && response.text) break;
-        } catch {
-          // retry next
-        }
-      }
-
-      if (response && response.text) {
-        let parsed = JSON.parse(response.text.trim());
-        if (!Array.isArray(parsed) && parsed.mcqs) parsed = parsed.mcqs;
-        if (Array.isArray(parsed)) {
-          res.json({ success: true, questions: parsed.slice(0, count) });
-          return;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Quiz generation fallback:', err);
+  if (!ai) {
+    res.status(503).json({
+      error: 'AI service is not configured. Please ensure GEMINI_API_KEY is configured in your environment variables.',
+      code: 'API_KEY_MISSING',
+    });
+    return;
   }
 
-  // Fallback questions to guarantee user requested count
-  const fallbackQuestions = generateFallbackMCQs(title, count);
-  res.json({ success: true, questions: fallbackQuestions, isFallback: true });
+  try {
+    let response;
+    const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+    for (const m of modelsToTry) {
+      try {
+        response = await ai.models.generateContent({
+          model: m,
+          contents: quizPrompt,
+          config: { responseMimeType: 'application/json' },
+        });
+        if (response && response.text) break;
+      } catch {
+        // retry next
+      }
+    }
+
+    if (response && response.text) {
+      let parsed = JSON.parse(response.text.trim());
+      if (!Array.isArray(parsed) && parsed.mcqs) parsed = parsed.mcqs;
+      if (Array.isArray(parsed)) {
+        res.json({ success: true, questions: parsed.slice(0, count) });
+        return;
+      }
+    }
+
+    throw new Error('Could not parse valid quiz questions from AI response');
+  } catch (err: any) {
+    console.error('Quiz generation error:', err);
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      error: 'Failed to generate practice quiz with AI. Please try again.',
+      details: errorMsg,
+      code: 'QUIZ_GENERATION_FAILED',
+    });
+    return;
+  }
 });
 
 // Context-Aware Gemini Study Chat & Google Search Grounding Endpoint
 app.post('/api/chat', async (req: Request, res: Response) => {
-  const { messages = [], context = null, forceSearch = false } = req.body;
+  const { messages = [], context = null, forceSearch = false, stream = false } = req.body;
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     res.status(400).json({ error: 'Please provide valid messages array.' });
+    return;
+  }
+
+  if (!ai) {
+    res.status(503).json({
+      error: 'AI service is not configured. Please ensure GEMINI_API_KEY is configured in your server environment variables.',
+      code: 'API_KEY_MISSING',
+    });
     return;
   }
 
@@ -717,80 +614,140 @@ Core Pedagogical Directives:
     parts: [{ text: m.content }],
   }));
 
+  const config: any = {
+    systemInstruction,
+  };
+
+  if (wantsSearch) {
+    config.tools = [{ googleSearch: {} }];
+  }
+
   try {
-    if (ai) {
-      const config: any = {
-        systemInstruction,
-      };
+    // If client requested Server-Sent Events (SSE) streaming
+    if (stream || req.query.stream === 'true') {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
 
-      // Enable Google Search Grounding when requested or when current web info is needed
-      if (wantsSearch) {
-        config.tools = [{ googleSearch: {} }];
-      }
+      const responseStream = await ai.models.generateContentStream({
+        model: 'gemini-3.8-flash',
+        contents: formattedContents,
+        config,
+      });
 
-      let response;
-      const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
-      for (const m of modelsToTry) {
-        try {
-          response = await ai.models.generateContent({
-            model: m,
-            contents: formattedContents,
-            config,
-          });
-          if (response && response.text) break;
-        } catch (mErr) {
-          console.warn(`Model ${m} in /api/chat error, trying next:`, mErr instanceof Error ? mErr.message : String(mErr));
+      let fullGrounded = false;
+      const sources: { title: string; url: string }[] = [];
+
+      for await (const chunk of responseStream) {
+        if (chunk.text) {
+          res.write(`data: ${JSON.stringify({ text: chunk.text })}\n\n`);
         }
-      }
-
-      if (response && response.text) {
-        let isGrounded = false;
-        const sources: { title: string; url: string }[] = [];
-
-        // Extract grounding chunks if search was used
-        const grounding = response.candidates?.[0]?.groundingMetadata;
+        const grounding = chunk.candidates?.[0]?.groundingMetadata;
         if (grounding?.groundingChunks && Array.isArray(grounding.groundingChunks)) {
-          for (const chunk of grounding.groundingChunks) {
-            if (chunk.web?.uri) {
-              isGrounded = true;
+          for (const c of grounding.groundingChunks) {
+            if (c.web?.uri && !sources.some(s => s.url === c.web?.uri)) {
+              fullGrounded = true;
               sources.push({
-                title: chunk.web.title || chunk.web.uri,
-                url: chunk.web.uri,
+                title: c.web.title || c.web.uri,
+                url: c.web.uri,
               });
             }
           }
         }
+      }
 
-        res.json({
-          reply: response.text.trim(),
-          isGrounded,
-          sources,
+      if (sources.length > 0) {
+        res.write(`data: ${JSON.stringify({ sources, isGrounded: fullGrounded })}\n\n`);
+      }
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+      return;
+    }
+
+    // Standard JSON response
+    let response;
+    const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+    let lastError: any = null;
+
+    for (const m of modelsToTry) {
+      try {
+        response = await ai.models.generateContent({
+          model: m,
+          contents: formattedContents,
+          config,
         });
-        return;
+        if (response && response.text) break;
+      } catch (mErr) {
+        lastError = mErr;
+        console.warn(`Model ${m} in /api/chat error, trying next:`, mErr instanceof Error ? mErr.message : String(mErr));
+        if (config.tools) {
+          try {
+            const noToolsConfig = { ...config };
+            delete noToolsConfig.tools;
+            response = await ai.models.generateContent({
+              model: m,
+              contents: formattedContents,
+              config: noToolsConfig,
+            });
+            if (response && response.text) break;
+          } catch (retryErr) {
+            lastError = retryErr;
+          }
+        }
       }
     }
-  } catch (err) {
+
+    if (response && response.text) {
+      let isGrounded = false;
+      const sources: { title: string; url: string }[] = [];
+
+      const grounding = response.candidates?.[0]?.groundingMetadata;
+      if (grounding?.groundingChunks && Array.isArray(grounding.groundingChunks)) {
+        for (const chunk of grounding.groundingChunks) {
+          if (chunk.web?.uri) {
+            isGrounded = true;
+            sources.push({
+              title: chunk.web.title || chunk.web.uri,
+              url: chunk.web.uri,
+            });
+          }
+        }
+      }
+
+      res.json({
+        reply: response.text.trim(),
+        isGrounded,
+        sources,
+      });
+      return;
+    }
+
+    throw lastError || new Error('No response text received from Gemini');
+  } catch (err: any) {
     console.error('Chat endpoint error:', err);
-  }
+    const errorMsg = err instanceof Error ? err.message : String(err);
 
-  // Graceful rule-based educational response when offline or before API key setup
-  let fallbackReply = '';
-  if (context && context.studyPackTitle) {
-    fallbackReply = `Based on your study pack **"${context.studyPackTitle}"**:\n\n${
-      context.summary
-        ? `${context.summary.slice(0, 300)}...\n\n`
-        : ''
-    }To study this effectively: focus on the core governing relationships, test yourself on the definitions, and review the formula cheat-sheet. Let me know which specific formula or chapter concept you'd like me to explain step-by-step!`;
-  } else {
-    fallbackReply = `I am your **DASTANAY Study Companion**. You can upload lecture notes, slides, or textbook excerpts to generate a tailored Study Pack, or ask me directly to explain any academic concept, formula, or exam strategy.`;
-  }
+    let status = 500;
+    let message = 'DASTANAY AI is temporarily unavailable. Please try again.';
+    let code = 'AI_ERROR';
 
-  res.json({
-    reply: fallbackReply,
-    isGrounded: false,
-    sources: [],
-    isFallback: true,
-  });
+    if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('quota') || errorMsg.toLowerCase().includes('rate limit')) {
+      status = 429;
+      message = 'AI usage limit reached. Please try again shortly.';
+      code = 'RATE_LIMIT';
+    } else if (errorMsg.includes('401') || errorMsg.toLowerCase().includes('unauthorized') || errorMsg.toLowerCase().includes('api key')) {
+      status = 401;
+      message = 'AI API key is invalid or unauthorized. Please verify GEMINI_API_KEY.';
+      code = 'AUTH_ERROR';
+    }
+
+    res.status(status).json({
+      error: message,
+      details: errorMsg,
+      code,
+    });
+    return;
+  }
 });
 
 // Intelligent fallback generator to ensure DASTANAY works reliably even offline or during API limits
@@ -1155,7 +1112,11 @@ async function startServer() {
   });
 }
 
-startServer().catch(err => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+if (!process.env.VERCEL) {
+  startServer().catch(err => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}
+
+export default app;
